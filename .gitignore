@@ -1,0 +1,5 @@
+.devcontainer/*-local.sh
+bin/
+game-of-life
+input.txt
+output.txt

@@ -1,0 +1,4 @@
+{
+	"window.title": "${activeEditorMedium}${dirty}${separator}Game of Life${separator}${appName}",
+	"go.toolsGopath": "/usr/lib/go"
+}
