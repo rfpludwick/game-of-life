@@ -16,20 +16,24 @@ import (
 
 // Prepare all CLI flags, as well as global variables derived
 var (
-	flagShowHelp        bool
-	flagInputFile       string
-	flagOutputFile      string
-	flagOutputDirectory string
-	flagTicks           uint64
-	flagWraparound      bool
-	flagWorldDimensions string
+	flagShowHelp           bool
+	flagInputFile          string
+	flagOutputFile         string
+	flagOutputDirectory    string
+	flagTicks              uint64
+	flagWraparound         bool
+	flagWorldDimensions    string
+	flagNewLifeSpawn       string
+	flagExistingLifeRemain string
 
 	worldMinX int64
 	worldMaxX int64
 	worldMinY int64
 	worldMaxY int64
 
-	ticksDigitsLength uint64
+	ticksDigitsLength  uint64
+	newLifeSpawn       []int
+	existingLifeRemain []int
 )
 
 // Init flags system
@@ -40,7 +44,9 @@ func init() {
 	flag.StringVar(&flagOutputDirectory, "outdir", "", "Output directory to log all ticks")
 	flag.Uint64Var(&flagTicks, "ticks", 10, "Number of ticks to run")
 	flag.BoolVar(&flagWraparound, "wraparound", true, "Wrap the world around at the edges")
-	flag.StringVar(&flagWorldDimensions, "world", fmt.Sprintf("%d:%d;%d:%d", math.MinInt64, math.MaxInt64, math.MinInt64, math.MaxInt64), "The dimensions of the world in format min-x:max-x;min-y:max-y")
+	flag.StringVar(&flagWorldDimensions, "world", fmt.Sprintf("%d:%d;%d:%d", math.MinInt64, math.MaxInt64, math.MinInt64, math.MaxInt64), "The dimensions of the world; in format min-x:max-x;min-y:max-y")
+	flag.StringVar(&flagNewLifeSpawn, "newlife", "3", "How many neighbors are required for new life to spawn; comma-delimited integer format")
+	flag.StringVar(&flagExistingLifeRemain, "exlife", "2,3", "How many neighbors are required for existing life to remain; comma-delimited integer format")
 }
 
 func main() {
@@ -98,13 +104,30 @@ func main() {
 					neighborsAlive += hasLife(organisms, coordX, coordYTop)
 				}
 
-				// Coordinates will be alive if:
+				// Coordinates will be alive *by default* if:
 				// 1. Already alive and 2-3 live neighbors
 				// 2. Not alive and 3 live neighbors
-				if neighborsAlive >= 2 && neighborsAlive <= 3 {
-					if alive == 1 || neighborsAlive == 3 {
-						addOrganism(organismsNext, coordX, coordY)
+				// This can be configured via CLI parameters
+				add := false
+
+				var neighborsCheck *[]int
+
+				if alive == 1 {
+					neighborsCheck = &existingLifeRemain
+				} else {
+					neighborsCheck = &newLifeSpawn
+				}
+
+				for _, neighbors := range *neighborsCheck {
+					if neighborsAlive == neighbors {
+						add = true
+
+						break
 					}
+				}
+
+				if add {
+					addOrganism(organismsNext, coordX, coordY)
 				}
 			}
 		}
@@ -216,6 +239,36 @@ func bootstrap() {
 			ticksDigitsLength++
 		}
 	}
+
+	// New life spawn
+	for _, neighborString := range strings.Split(flagNewLifeSpawn, ",") {
+		neighbor, err := strconv.Atoi(strings.TrimSpace(neighborString))
+
+		if err != nil {
+			log.Fatalf("Unable to parse integer from newLifeSpawn string %s: %s", neighborString, err)
+		}
+
+		if neighbor < 1 {
+			log.Fatalf("Neighbor integer %d must be greater than 0", neighbor)
+		}
+
+		newLifeSpawn = append(newLifeSpawn, neighbor)
+	}
+
+	// Existing life remain
+	for _, neighborString := range strings.Split(flagExistingLifeRemain, ",") {
+		neighbor, err := strconv.Atoi(strings.TrimSpace(neighborString))
+
+		if err != nil {
+			log.Fatalf("Unable to parse integer from existingLifeRemain string %s: %s", neighborString, err)
+		}
+
+		if neighbor < 1 {
+			log.Fatalf("Neighbor integer %d must be greater than 0", neighbor)
+		}
+
+		existingLifeRemain = append(existingLifeRemain, neighbor)
+	}
 }
 
 // Seeds the initial set of organisms from the input
@@ -255,13 +308,13 @@ func seedLife() map[int64]map[int64]int {
 		coordX, err := strconv.ParseInt(strings.TrimSpace(coordinates[0]), 10, 64)
 
 		if err != nil {
-			log.Fatalf("Unable to parse X-coordinate integer from stdin string %s: %s", coordinates[0], err)
+			log.Fatalf("Unable to parse X-coordinate integer from input string %s: %s", coordinates[0], err)
 		}
 
 		coordY, err := strconv.ParseInt(strings.TrimSpace(coordinates[1]), 10, 64)
 
 		if err != nil {
-			log.Fatalf("Unable to parse Y-coordinate integer from stdin string %s: %s", coordinates[1], err)
+			log.Fatalf("Unable to parse Y-coordinate integer from input string %s: %s", coordinates[1], err)
 		}
 
 		// Check within world boundaries
