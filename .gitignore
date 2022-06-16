@@ -1,5 +1,6 @@
 .devcontainer/*-local.sh
 bin/
+configuration.yaml
 game-of-life
 input.txt
 output.txt

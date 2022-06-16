@@ -1,0 +1,19 @@
+---
+
+input_file: input.txt
+output_file: output.txt
+output_directory: results
+ticks: 10
+disable_wraparound: false
+world_dimensions:
+  x:
+    minimum: -10
+    maximum: 10
+  y:
+    minimum: -10
+    maximum: 10
+new_life_spawn:
+  - 3
+existing_life_remain:
+  - 2
+  - 3

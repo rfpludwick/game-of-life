@@ -12,54 +12,96 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"gopkg.in/yaml.v3"
 )
 
-// Prepare all CLI flags, as well as global variables derived
+// Configuration file struct
+type ConfigurationFile struct {
+	InputFile          string                           `yaml:"input_file"`
+	OutputFile         string                           `yaml:"output_file"`
+	OutputDirectory    string                           `yaml:"output_directory"`
+	Ticks              uint64                           `yaml:"ticks"`
+	DisableWraparound  bool                             `yaml:"disable_wraparound"`
+	WorldDimensions    ConfigurationFileWorldDimensions `yaml:"world_dimensions"`
+	NewLifeSpawn       []int                            `yaml:"new_life_spawn"`
+	ExistingLifeRemain []int                            `yaml:"existing_life_remain"`
+}
+
+type ConfigurationFileWorldDimensions struct {
+	X ConfigurationFileWorldDimensionsMeasurements `yaml:"x"`
+	Y ConfigurationFileWorldDimensionsMeasurements `yaml:"y"`
+}
+
+type ConfigurationFileWorldDimensionsMeasurements struct {
+	Minimum int64 `yaml:"minimum"`
+	Maximum int64 `yaml:"maximum"`
+}
+
+// Prepare all CLI flags as well as application derived variables from CLI flags & configuration file
 var (
+	flagConfigurationFile  string
 	flagShowHelp           bool
 	flagInputFile          string
 	flagOutputFile         string
 	flagOutputDirectory    string
 	flagTicks              uint64
-	flagWraparound         bool
+	flagDisableWraparound  bool
 	flagWorldDimensions    string
 	flagNewLifeSpawn       string
 	flagExistingLifeRemain string
 
-	worldMinX int64
-	worldMaxX int64
-	worldMinY int64
-	worldMaxY int64
+	appInputFile          string
+	appOutputFile         string
+	appOutputDirectory    string
+	appTicks              uint64
+	appWraparound         bool
+	appWorldMinX          int64
+	appWorldMaxX          int64
+	appWorldMinY          int64
+	appWorldMaxY          int64
+	appNewLifeSpawn       []int
+	appExistingLifeRemain []int
 
-	ticksDigitsLength  uint64
-	newLifeSpawn       []int
-	existingLifeRemain []int
+	ticksDigitsLength uint64
 )
 
-// Init flags system
+// Init default application vars and flags system
 func init() {
+	appTicks = 10
+	appWraparound = true
+	appWorldMinX = math.MinInt64
+	appWorldMaxX = math.MaxInt64
+	appWorldMinY = math.MinInt64
+	appWorldMaxY = math.MaxInt64
+	appNewLifeSpawn = []int{3}
+	appExistingLifeRemain = []int{2, 3}
+
+	flag.StringVar(&flagConfigurationFile, "configuration", "", "Path to configuration file to use")
 	flag.BoolVar(&flagShowHelp, "help", false, "Show help")
 	flag.StringVar(&flagInputFile, "input", "", "Input file to use rather than stdin")
 	flag.StringVar(&flagOutputFile, "output", "", "Output file to use rather than stdout")
 	flag.StringVar(&flagOutputDirectory, "outdir", "", "Output directory to log all ticks")
-	flag.Uint64Var(&flagTicks, "ticks", 10, "Number of ticks to run")
-	flag.BoolVar(&flagWraparound, "wraparound", true, "Wrap the world around at the edges")
-	flag.StringVar(&flagWorldDimensions, "world", fmt.Sprintf("%d:%d;%d:%d", math.MinInt64, math.MaxInt64, math.MinInt64, math.MaxInt64), "The dimensions of the world; in format min-x:max-x;min-y:max-y")
-	flag.StringVar(&flagNewLifeSpawn, "newlife", "3", "How many neighbors are required for new life to spawn; comma-delimited integer format")
-	flag.StringVar(&flagExistingLifeRemain, "exlife", "2,3", "How many neighbors are required for existing life to remain; comma-delimited integer format")
+	flag.Uint64Var(&flagTicks, "ticks", 0, "Number of ticks to run")
+	flag.BoolVar(&flagDisableWraparound, "nowrap", false, "Disables wrapping the world around at the edges")
+	flag.StringVar(&flagWorldDimensions, "world", "", "The dimensions of the world; in format min-x:max-x;min-y:max-y")
+	flag.StringVar(&flagNewLifeSpawn, "newlife", "", "How many neighbors are required for new life to spawn; comma-delimited integer format")
+	flag.StringVar(&flagExistingLifeRemain, "exlife", "", "How many neighbors are required for existing life to remain; comma-delimited integer format")
 }
 
 func main() {
-	// Bootstrap
+	// Setup
+	parseFlags()
+	processConfigurationFile()
+	processConfigurationCli()
 	bootstrap()
 
-	// Seed life
 	organisms := seedLife()
 
 	// Run the simulation
 	var tick uint64
 
-	for tick = 0; tick < flagTicks; tick++ {
+	for tick = 0; tick < appTicks; tick++ {
 		outputOrganismsTick(organisms, tick)
 
 		organismsNext := make(map[int64]map[int64]int)
@@ -113,9 +155,9 @@ func main() {
 				var neighborsCheck *[]int
 
 				if alive == 1 {
-					neighborsCheck = &existingLifeRemain
+					neighborsCheck = &appExistingLifeRemain
 				} else {
-					neighborsCheck = &newLifeSpawn
+					neighborsCheck = &appNewLifeSpawn
 				}
 
 				for _, neighbors := range *neighborsCheck {
@@ -136,14 +178,14 @@ func main() {
 	}
 
 	// And we're done; let's wrap up
-	outputOrganismsTick(organisms, flagTicks)
+	outputOrganismsTick(organisms, appTicks)
 
 	var file io.Writer
 	var err error
 
-	if flagOutputFile != "" {
-		if file, err = os.OpenFile(flagOutputFile, os.O_RDWR|os.O_CREATE, 0755); err != nil {
-			log.Fatal("Error opening output file:", flagOutputFile)
+	if appOutputFile != "" {
+		if file, err = os.OpenFile(appOutputFile, os.O_RDWR|os.O_CREATE, 0755); err != nil {
+			log.Fatal("Error opening output file:", appOutputFile)
 		}
 	} else {
 		file = os.Stdout
@@ -153,9 +195,8 @@ func main() {
 	os.Exit(0)
 }
 
-// Parses CLI flags and handles any upfront processing resulting from said flags
-func bootstrap() {
-	// CLI flags
+// Parses CLI flags
+func parseFlags() {
 	flag.Parse()
 
 	if flagShowHelp {
@@ -163,76 +204,193 @@ func bootstrap() {
 
 		os.Exit(0)
 	}
+}
 
-	if flagTicks < 1 {
-		log.Fatal("Number of ticks must be greater than 0:", flagTicks)
+// Processes the configuration file and applies any settings
+func processConfigurationFile() {
+	if flagConfigurationFile != "" {
+		// Parse & validate
+		configurationFileBody, err := os.ReadFile(flagConfigurationFile)
+
+		if err != nil {
+			log.Fatal("CLI flags error: Error reading configuration file:", err)
+		}
+
+		var cf ConfigurationFile
+
+		if err = yaml.Unmarshal(configurationFileBody, &cf); err != nil {
+			log.Fatal("CLI flags error: Error decoding configuration YAML:", err)
+		}
+
+		// Process values
+		if cf.InputFile != "" {
+			appInputFile = cf.InputFile
+		}
+
+		if cf.OutputFile != "" {
+			appOutputFile = cf.OutputFile
+		}
+
+		if cf.OutputDirectory != "" {
+			appOutputDirectory = cf.OutputDirectory
+		}
+
+		if cf.Ticks != 0 {
+			appTicks = cf.Ticks
+		}
+
+		if cf.DisableWraparound {
+			appWraparound = false
+		}
+
+		if cf.WorldDimensions.X.Minimum != 0 || cf.WorldDimensions.X.Maximum != 0 || cf.WorldDimensions.Y.Minimum != 0 || cf.WorldDimensions.Y.Maximum != 0 {
+			appWorldMinX = cf.WorldDimensions.X.Minimum
+			appWorldMaxX = cf.WorldDimensions.X.Maximum
+			appWorldMinY = cf.WorldDimensions.Y.Minimum
+			appWorldMaxY = cf.WorldDimensions.X.Maximum
+		}
+
+		if len(cf.NewLifeSpawn) > 0 {
+			appNewLifeSpawn = cf.NewLifeSpawn
+		}
+
+		if len(cf.ExistingLifeRemain) > 0 {
+			appExistingLifeRemain = cf.ExistingLifeRemain
+		}
+	}
+}
+
+// Processes the configuration passed by the CLI
+func processConfigurationCli() {
+	if flagInputFile != "" {
+		appInputFile = flagInputFile
 	}
 
-	// Setup world dimensions
-	parts := strings.Split(flagWorldDimensions, ";")
-	numberParts := len(parts)
-
-	if numberParts != 2 {
-		log.Fatal("Incorrect number of dimensions in world:", numberParts)
+	if flagOutputFile != "" {
+		appOutputFile = flagOutputFile
 	}
 
-	partsX := strings.Split(parts[0], ":")
-	numberPartsX := len(partsX)
-
-	if numberPartsX != 2 {
-		log.Fatal("Incorrect number of directions in X dimension:", numberPartsX)
+	if flagOutputDirectory != "" {
+		appOutputDirectory = flagOutputDirectory
 	}
 
-	partsY := strings.Split(parts[1], ":")
-	numberPartsY := len(partsY)
-
-	if numberPartsY != 2 {
-		log.Fatal("Incorrect number of directions in X dimension:", numberPartsY)
+	if flagTicks != 0 {
+		appTicks = flagTicks
 	}
 
-	var err error
-
-	worldMinX, err = strconv.ParseInt(strings.TrimSpace(partsX[0]), 10, 64)
-
-	if err != nil {
-		log.Fatalf("Unable to parse world X dimension minimum %s: %s", partsX[0], err)
+	if !flagDisableWraparound {
+		appWraparound = false
 	}
 
-	worldMaxX, err = strconv.ParseInt(strings.TrimSpace(partsX[1]), 10, 64)
+	if flagWorldDimensions != "" {
+		parts := strings.Split(flagWorldDimensions, ";")
+		numberParts := len(parts)
 
-	if err != nil {
-		log.Fatalf("Unable to parse world X dimension maximum %s: %s", partsX[1], err)
+		if numberParts != 2 {
+			log.Fatal("CLI flags error: Incorrect number of dimensions in world:", numberParts)
+		}
+
+		partsX := strings.Split(parts[0], ":")
+		numberPartsX := len(partsX)
+
+		if numberPartsX != 2 {
+			log.Fatal("CLI flags error: Incorrect number of directions in X dimension:", numberPartsX)
+		}
+
+		partsY := strings.Split(parts[1], ":")
+		numberPartsY := len(partsY)
+
+		if numberPartsY != 2 {
+			log.Fatal("CLI flags error: Incorrect number of directions in X dimension:", numberPartsY)
+		}
+
+		var err error
+
+		appWorldMinX, err = strconv.ParseInt(strings.TrimSpace(partsX[0]), 10, 64)
+
+		if err != nil {
+			log.Fatalf("CLI flags error: Unable to parse world X dimension minimum %s: %s", partsX[0], err)
+		}
+
+		appWorldMaxX, err = strconv.ParseInt(strings.TrimSpace(partsX[1]), 10, 64)
+
+		if err != nil {
+			log.Fatalf("CLI flags error: Unable to parse world X dimension maximum %s: %s", partsX[1], err)
+		}
+
+		appWorldMinY, err = strconv.ParseInt(strings.TrimSpace(partsY[0]), 10, 64)
+
+		if err != nil {
+			log.Fatalf("CLI flags error: Unable to parse world Y dimension minimum %s: %s", partsY[0], err)
+		}
+
+		appWorldMaxY, err = strconv.ParseInt(strings.TrimSpace(partsY[1]), 10, 64)
+
+		if err != nil {
+			log.Fatalf("CLI flags error: Unable to parse world Y dimension maximum %s: %s", partsY[1], err)
+		}
 	}
 
-	worldMinY, err = strconv.ParseInt(strings.TrimSpace(partsY[0]), 10, 64)
+	if flagNewLifeSpawn != "" {
+		appNewLifeSpawn = []int{}
 
-	if err != nil {
-		log.Fatalf("Unable to parse world Y dimension minimum %s: %s", partsY[0], err)
+		for _, neighborString := range strings.Split(flagNewLifeSpawn, ",") {
+			neighbor, err := strconv.Atoi(strings.TrimSpace(neighborString))
+
+			if err != nil {
+				log.Fatalf("CLI flags error: Unable to parse integer from newLifeSpawn string %s: %s", neighborString, err)
+			}
+
+			if neighbor < 1 {
+				log.Fatalf("CLI flags error: Neighbor integer %d must be greater than 0", neighbor)
+			}
+
+			appNewLifeSpawn = append(appNewLifeSpawn, neighbor)
+		}
 	}
 
-	worldMaxY, err = strconv.ParseInt(strings.TrimSpace(partsY[1]), 10, 64)
+	if flagExistingLifeRemain != "" {
+		appExistingLifeRemain = []int{}
 
-	if err != nil {
-		log.Fatalf("Unable to parse world Y dimension maximum %s: %s", partsY[1], err)
+		for _, neighborString := range strings.Split(flagExistingLifeRemain, ",") {
+			neighbor, err := strconv.Atoi(strings.TrimSpace(neighborString))
+
+			if err != nil {
+				log.Fatalf("CLI flags error: Unable to parse integer from existingLifeRemain string %s: %s", neighborString, err)
+			}
+
+			if neighbor < 1 {
+				log.Fatalf("CLI flags error: Neighbor integer %d must be greater than 0", neighbor)
+			}
+
+			appExistingLifeRemain = append(appExistingLifeRemain, neighbor)
+		}
+	}
+}
+
+// Common bootstrapping after the configuration file and CLI flags have been processed
+func bootstrap() {
+	if appTicks < 1 {
+		log.Fatal("Bootstrap error: Number of ticks must be greater than 0:", appTicks)
 	}
 
 	// Output directory?
-	if flagOutputDirectory != "" {
-		fileInfo, err := os.Stat(flagOutputDirectory)
+	if appOutputDirectory != "" {
+		fileInfo, err := os.Stat(appOutputDirectory)
 
 		if errors.Is(err, os.ErrNotExist) {
-			err := os.Mkdir(flagOutputDirectory, 0755)
+			err := os.Mkdir(appOutputDirectory, 0755)
 
 			if err != nil {
-				log.Fatalf("Unable to create output directory %s: %s", flagOutputDirectory, err)
+				log.Fatalf("Bootstrap error: Unable to create output directory %s: %s", appOutputDirectory, err)
 			}
 		} else if !fileInfo.IsDir() {
-			log.Fatalf("Output directory %s exists but is already a file", flagOutputDirectory)
+			log.Fatalf("Bootstrap error: Output directory %s exists but is already a file", appOutputDirectory)
 		}
 
 		// Calculate the padding we'll need for naming files later
 		ticksDigitsLength = 0
-		i := flagTicks
+		i := appTicks
 
 		for i != 0 {
 			i /= 10
@@ -240,34 +398,13 @@ func bootstrap() {
 		}
 	}
 
-	// New life spawn
-	for _, neighborString := range strings.Split(flagNewLifeSpawn, ",") {
-		neighbor, err := strconv.Atoi(strings.TrimSpace(neighborString))
-
-		if err != nil {
-			log.Fatalf("Unable to parse integer from newLifeSpawn string %s: %s", neighborString, err)
-		}
-
-		if neighbor < 1 {
-			log.Fatalf("Neighbor integer %d must be greater than 0", neighbor)
-		}
-
-		newLifeSpawn = append(newLifeSpawn, neighbor)
+	// World dimensions sanity check
+	if appWorldMinX >= appWorldMaxX {
+		log.Fatalf("Bootstrap error: World X dimension minimum %d must be less than world X dimension maximum %d", appWorldMinX, appWorldMaxX)
 	}
 
-	// Existing life remain
-	for _, neighborString := range strings.Split(flagExistingLifeRemain, ",") {
-		neighbor, err := strconv.Atoi(strings.TrimSpace(neighborString))
-
-		if err != nil {
-			log.Fatalf("Unable to parse integer from existingLifeRemain string %s: %s", neighborString, err)
-		}
-
-		if neighbor < 1 {
-			log.Fatalf("Neighbor integer %d must be greater than 0", neighbor)
-		}
-
-		existingLifeRemain = append(existingLifeRemain, neighbor)
+	if appWorldMinY >= appWorldMaxY {
+		log.Fatalf("Bootstrap error: World Y dimension minimum %d must be less than world Y dimension maximum %d", appWorldMinY, appWorldMaxY)
 	}
 }
 
@@ -278,9 +415,9 @@ func seedLife() map[int64]map[int64]int {
 	var file io.Reader
 	var err error
 
-	if flagInputFile != "" {
-		if file, err = os.Open(flagInputFile); err != nil {
-			log.Fatal("Error opening input file")
+	if appInputFile != "" {
+		if file, err = os.Open(appInputFile); err != nil {
+			log.Fatal("Input error: Error opening input file")
 		}
 	} else {
 		file = os.Stdin
@@ -294,12 +431,12 @@ func seedLife() map[int64]map[int64]int {
 
 		// Left parens check
 		if line[0] != 40 {
-			log.Fatal("Error reading left parenthesis:", line[0])
+			log.Fatal("Input error: Error reading left parenthesis:", line[0])
 		}
 
 		// Right parens check
 		if line[lineLength] != 41 {
-			log.Fatal("Error reading right parenthesis:", line[lineLength])
+			log.Fatal("Input error: Error reading right parenthesis:", line[lineLength])
 		}
 
 		// Parse coordinates
@@ -308,30 +445,30 @@ func seedLife() map[int64]map[int64]int {
 		coordX, err := strconv.ParseInt(strings.TrimSpace(coordinates[0]), 10, 64)
 
 		if err != nil {
-			log.Fatalf("Unable to parse X-coordinate integer from input string %s: %s", coordinates[0], err)
+			log.Fatalf("Input error: Unable to parse X-coordinate integer from input string %s: %s", coordinates[0], err)
 		}
 
 		coordY, err := strconv.ParseInt(strings.TrimSpace(coordinates[1]), 10, 64)
 
 		if err != nil {
-			log.Fatalf("Unable to parse Y-coordinate integer from input string %s: %s", coordinates[1], err)
+			log.Fatalf("Input error: Unable to parse Y-coordinate integer from input string %s: %s", coordinates[1], err)
 		}
 
 		// Check within world boundaries
-		if coordX < worldMinX {
-			log.Fatalf("X-coordinate %d outside the world minimum bounds %d", coordX, worldMinX)
+		if coordX < appWorldMinX {
+			log.Fatalf("Input error: X-coordinate %d outside the world minimum bounds %d", coordX, appWorldMinX)
 		}
 
-		if coordX > worldMaxX {
-			log.Fatalf("X-coordinate %d outside the world maximum bounds %d", coordX, worldMaxX)
+		if coordX > appWorldMaxX {
+			log.Fatalf("Input error: X-coordinate %d outside the world maximum bounds %d", coordX, appWorldMaxX)
 		}
 
-		if coordY < worldMinY {
-			log.Fatalf("Y-coordinate %d outside the world minimum bounds %d", coordY, worldMinY)
+		if coordY < appWorldMinY {
+			log.Fatalf("Input error: Y-coordinate %d outside the world minimum bounds %d", coordY, appWorldMinY)
 		}
 
-		if coordY > worldMaxY {
-			log.Fatalf("Y-coordinate %d outside the world maximum bounds %d", coordY, worldMaxY)
+		if coordY > appWorldMaxY {
+			log.Fatalf("Input error: Y-coordinate %d outside the world maximum bounds %d", coordY, appWorldMaxY)
 		}
 
 		// Add to organisms
@@ -339,14 +476,14 @@ func seedLife() map[int64]map[int64]int {
 	}
 
 	if err := scanner.Err(); err != nil {
-		log.Fatal("Error reading standard input:", err)
+		log.Fatal("Input error: Error reading standard input:", err)
 	}
 
 	return organisms
 }
 
 // Returns the neighbors to the supplied X-coordinate: left and right
-// Also returns boolean flags as to if the left and right neighbors exist if
+// Also returns booleans marking if the left and right neighbors exist if
 // wraparound is enabled
 func getNeighborsX(coordX int64) (int64, int64, bool, bool) {
 	var coordXLeft int64
@@ -354,9 +491,9 @@ func getNeighborsX(coordX int64) (int64, int64, bool, bool) {
 	var coordXRight int64
 	coordXRightExists := true
 
-	if coordX == worldMinX {
-		if flagWraparound {
-			coordXLeft = worldMaxX
+	if coordX == appWorldMinX {
+		if appWraparound {
+			coordXLeft = appWorldMaxX
 		} else {
 			coordXLeftExists = false
 		}
@@ -364,9 +501,9 @@ func getNeighborsX(coordX int64) (int64, int64, bool, bool) {
 		coordXLeft = coordX - 1
 	}
 
-	if coordX == worldMaxX {
-		if flagWraparound {
-			coordXRight = worldMinX
+	if coordX == appWorldMaxX {
+		if appWraparound {
+			coordXRight = appWorldMinX
 		} else {
 			coordXRightExists = false
 		}
@@ -378,7 +515,7 @@ func getNeighborsX(coordX int64) (int64, int64, bool, bool) {
 }
 
 // Returns the neighbors to the supplied Y-coordinate: bottom and top
-// Also returns boolean flags as to if the bottom and top neighbors exist if
+// Also returns booleans marking if the bottom and top neighbors exist if
 // wraparound is enabled
 func getNeighborsY(coordY int64) (int64, int64, bool, bool) {
 	var coordYBottom int64
@@ -386,9 +523,9 @@ func getNeighborsY(coordY int64) (int64, int64, bool, bool) {
 	var coordYTop int64
 	coordYTopExists := true
 
-	if coordY == worldMinY {
-		if flagWraparound {
-			coordYBottom = worldMaxY
+	if coordY == appWorldMinY {
+		if appWraparound {
+			coordYBottom = appWorldMaxY
 		} else {
 			coordYBottomExists = false
 		}
@@ -396,9 +533,9 @@ func getNeighborsY(coordY int64) (int64, int64, bool, bool) {
 		coordYBottom = coordY - 1
 	}
 
-	if coordY == worldMaxY {
-		if flagWraparound {
-			coordYTop = worldMinY
+	if coordY == appWorldMaxY {
+		if appWraparound {
+			coordYTop = appWorldMinY
 		} else {
 			coordYTopExists = false
 		}
@@ -479,11 +616,11 @@ func outputOrganisms(organisms map[int64]map[int64]int, file io.Writer) {
 
 // Outputs the organisms for a particular tick
 func outputOrganismsTick(organisms map[int64]map[int64]int, tick uint64) {
-	if flagOutputDirectory != "" {
+	if appOutputDirectory != "" {
 		var file io.Writer
 		var err error
 
-		filename := fmt.Sprintf("%s/%0"+strconv.Itoa(int(ticksDigitsLength))+"d.txt", flagOutputDirectory, tick)
+		filename := fmt.Sprintf("%s/%0"+strconv.Itoa(int(ticksDigitsLength))+"d.txt", appOutputDirectory, tick)
 
 		if file, err = os.OpenFile(filename, os.O_RDWR|os.O_CREATE, 0755); err != nil {
 			log.Fatalf("Error opening output file %s: %s", filename, err)
