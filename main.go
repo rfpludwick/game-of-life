@@ -333,8 +333,15 @@ func processConfigurationCli() {
 
 	if flagNewLifeSpawn != "" {
 		appNewLifeSpawn = []int{}
+		numberNewLifeSpawn := 0
 
 		for _, neighborString := range strings.Split(flagNewLifeSpawn, ",") {
+			numberNewLifeSpawn++
+
+			if numberNewLifeSpawn > 8 {
+				log.Fatalf("CLI flags error: Cannot have more than 8 possibilities for newLifeSpawn string %s: ", flagNewLifeSpawn)
+			}
+
 			neighbor, err := strconv.Atoi(strings.TrimSpace(neighborString))
 
 			if err != nil {
@@ -342,7 +349,11 @@ func processConfigurationCli() {
 			}
 
 			if neighbor < 1 {
-				log.Fatalf("CLI flags error: Neighbor integer %d must be greater than 0", neighbor)
+				log.Fatalf("CLI flags error: Neighbor integer %d for newLifeSpawn must be greater than 0", neighbor)
+			}
+
+			if neighbor > 8 {
+				log.Fatalf("CLI flags error: Neighbor integer %d for newLifeSpawn must be less than 8", neighbor)
 			}
 
 			appNewLifeSpawn = append(appNewLifeSpawn, neighbor)
@@ -351,8 +362,15 @@ func processConfigurationCli() {
 
 	if flagExistingLifeRemain != "" {
 		appExistingLifeRemain = []int{}
+		numberExistingLifeRemain := 0
 
 		for _, neighborString := range strings.Split(flagExistingLifeRemain, ",") {
+			numberExistingLifeRemain++
+
+			if numberExistingLifeRemain > 8 {
+				log.Fatalf("CLI flags error: Cannot have more than 8 possibilities for existingLifeRemain string %s: ", flagNewLifeSpawn)
+			}
+
 			neighbor, err := strconv.Atoi(strings.TrimSpace(neighborString))
 
 			if err != nil {
@@ -360,7 +378,11 @@ func processConfigurationCli() {
 			}
 
 			if neighbor < 1 {
-				log.Fatalf("CLI flags error: Neighbor integer %d must be greater than 0", neighbor)
+				log.Fatalf("CLI flags error: Neighbor integer %d for existingLifeRemain must be greater than 0", neighbor)
+			}
+
+			if neighbor > 8 {
+				log.Fatalf("CLI flags error: Neighbor integer %d for existingLifeRemain must be less than 8", neighbor)
 			}
 
 			appExistingLifeRemain = append(appExistingLifeRemain, neighbor)
