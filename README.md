@@ -15,22 +15,22 @@ CLI flags override anything loaded via the configuration file.
 - `-configuration <file>`: Use a configuration file
 - `-help`: Shows the help/usage of the application
 - `-input <file>`: Rather than use `stdin` for the input to the application, you
-can have it use this file instead
+  can have it use this file instead
 - `-output <file>`: Rather than use `stdout` for the Life 1.06 output of the application,
-you can have it use this file instead
+  you can have it use this file instead
 - `-outdir <directory>`: If you want to output the Life 1.06 format for **every
-single tick** of the world, you can set this to a directory and an output file
-will be generated for each tick, including the seed (which will be `*0.txt`)
+  single tick** of the world, you can set this to a directory and an output file
+  will be generated for each tick, including the seed (which will be `*0.txt`)
 - `-ticks <integer>`: The number of ticks/iterations to run in the world
 - `-nowrap`: By default, the world will wrap at the edges to the other side;
-you can disable this behavior if you want the world to have hard boundaries at the
-edges
+  you can disable this behavior if you want the world to have hard boundaries at
+  the edges
 - `-world <dimensions>`: By default the world will be as large as the signed 64-bit
-integer allows; you can set this manually with the format `min-x:max-x;min-y:max-y`
+  integer allows; you can set this manually with the format `min-x:max-x;min-y:max-y`
 - `-newlife <csv>`: With comma-delimited integers, you can set when new life will
-spawn in a coordinate
+  spawn in a coordinate
 - `-exlife <csv>`: With comma-delimited integers, you can set when existing life
-will remain in a coordinate
+  will remain in a coordinate
 
 ## Organisms Map
 
