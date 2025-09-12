@@ -623,14 +623,18 @@ func hasLife(organisms map[int64]map[int64]int, coordX int64, coordY int64) int 
 func outputOrganisms(organisms map[int64]map[int64]int, file io.Writer) {
 	coordXs := getSortedCoordXs(organisms)
 
-	fmt.Fprintln(file, "#Life 1.06")
+	if _, err := fmt.Fprintln(file, "#Life 1.06"); err != nil {
+		log.Fatal("Output error: Error writing to file:", err)
+	}
 
 	for _, coordX := range coordXs {
 		coordYs := getSortedCoordYs(organisms[coordX])
 
 		for _, coordY := range coordYs {
 			if organisms[coordX][coordY] == 1 {
-				fmt.Fprintf(file, "%d %d\n", coordX, coordY)
+				if _, err := fmt.Fprintf(file, "%d %d\n", coordX, coordY); err != nil {
+					log.Fatal("Output error: Error writing to file:", err)
+				}
 			}
 		}
 	}
